@@ -141,8 +141,14 @@ def run(tm, input_str, max_steps=200000, trace=False):
     steps = 0
     trace_lines = []
 
+    leading_blanks_re = re.compile("^" + re.escape(blank) + r"{2,}")
+    trailing_blanks_re = re.compile(re.escape(blank) + r"{2,}$")
+
     def render():
-        return "".join(left) + head_char + "".join(right) + f"   [state={state}]"
+        tape_str = "".join(left) + head_char + "".join(right)
+        tape_str = leading_blanks_re.sub(blank, tape_str)
+        tape_str = trailing_blanks_re.sub(blank, tape_str)
+        return tape_str + f"   [state={state}]"
 
     if trace:
         trace_lines.append(render())
