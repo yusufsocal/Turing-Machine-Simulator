@@ -124,7 +124,52 @@ def parse_tm(text):
     }
 
 
-def run(tm, input_str, max_steps=200000, trace=False):
+def prune_tape(tape, blank):
+    """Strip leading/trailing blanks from a list of tape symbols, like Turing.hs's pruneTape."""
+    tape = list(tape)
+    while tape and tape[0] == blank:
+        tape.pop(0)
+    while tape and tape[-1] == blank:
+        tape.pop()
+    return "".join(tape)
+
+
+def collapse_edge_blanks(s, blank):
+    """Collapse a run of >1 blanks at the very start or end of s down to a single blank."""
+    i = 0
+    while i < len(s) and s[i] == blank:
+        i += 1
+    if i > 1:
+        s = s[i - 1:]
+    j = len(s)
+    while j > 0 and s[j - 1] == blank:
+        j -= 1
+    if len(s) - j > 1:
+        s = s[:j + 1]
+    return s
+
+
+def render_tape_line(snapshot, blank):
+    """One human-readable trace line for a step_machine() snapshot."""
+    tape_str = "".join(snapshot["left"]) + snapshot["head_char"] + "".join(snapshot["right"])
+    tape_str = collapse_edge_blanks(tape_str, blank)
+    return f"{tape_str}   [state={snapshot['state']}]"
+
+
+def step_machine(tm, input_str, max_steps=200000):
+    """Generator yielding one snapshot per configuration of the machine, from the
+    initial configuration through the final accept/reject configuration.
+
+    Each snapshot is a dict:
+        left, head_char, right -- tape state split around the head
+        head_pos                -- head's absolute position (0 = first input symbol)
+        state, steps             -- current state and number of transitions taken so far
+        status                    -- "running", "accept", or "reject"
+        rejected_at               -- (state, symbol) if status == "reject", else None
+
+    The tape at any snapshot is list(left) + [head_char] + right, where left[i] sits
+    at position head_pos - len(left) + i, and right[i] sits at head_pos + 1 + i.
+    """
     blank = tm["blank"]
     transitions = tm["transitions"]
     accept_states = tm["accept_states"]
@@ -139,49 +184,25 @@ def run(tm, input_str, max_steps=200000, trace=False):
 
     state = tm["start_state"]
     steps = 0
-    trace_lines = []
-
-    leading_blanks_re = re.compile("^" + re.escape(blank) + r"{2,}")
-    trailing_blanks_re = re.compile(re.escape(blank) + r"{2,}$")
-
-    def render():
-        tape_str = "".join(left) + head_char + "".join(right)
-        tape_str = leading_blanks_re.sub(blank, tape_str)
-        tape_str = trailing_blanks_re.sub(blank, tape_str)
-        return tape_str + f"   [state={state}]"
-
-    if trace:
-        trace_lines.append(render())
+    head_pos = 0
 
     while True:
         if state in accept_states:
-            tape = list(left) + [head_char] + right
-            # prune leading/trailing blanks, like Turing.hs's pruneTape
-            while tape and tape[0] == blank:
-                tape.pop(0)
-            while tape and tape[-1] == blank:
-                tape.pop()
-            return {
-                "accept": True,
-                "final_tape": "".join(tape),
-                "steps": steps,
-                "trace": trace_lines,
-            }
+            yield {"left": list(left), "head_char": head_char, "right": list(right),
+                   "head_pos": head_pos, "state": state, "steps": steps,
+                   "status": "accept", "rejected_at": None}
+            return
 
         key = (state, head_char)
         if key not in transitions:
-            tape = list(left) + [head_char] + right
-            while tape and tape[0] == blank:
-                tape.pop(0)
-            while tape and tape[-1] == blank:
-                tape.pop()
-            return {
-                "accept": False,
-                "final_tape": "".join(tape),
-                "steps": steps,
-                "trace": trace_lines,
-                "rejected_at": key,
-            }
+            yield {"left": list(left), "head_char": head_char, "right": list(right),
+                   "head_pos": head_pos, "state": state, "steps": steps,
+                   "status": "reject", "rejected_at": key}
+            return
+
+        yield {"left": list(left), "head_char": head_char, "right": list(right),
+               "head_pos": head_pos, "state": state, "steps": steps,
+               "status": "running", "rejected_at": None}
 
         new_state, write_char, direction = transitions[key]
         state = new_state
@@ -189,6 +210,7 @@ def run(tm, input_str, max_steps=200000, trace=False):
         steps += 1
 
         if direction == "L":
+            head_pos -= 1
             if left:
                 new_head = left.pop()
             else:
@@ -196,6 +218,7 @@ def run(tm, input_str, max_steps=200000, trace=False):
             right.insert(0, head_char)
             head_char = new_head
         else:  # R
+            head_pos += 1
             if right:
                 new_head = right.pop(0)
             else:
@@ -203,11 +226,44 @@ def run(tm, input_str, max_steps=200000, trace=False):
             left.append(head_char)
             head_char = new_head
 
-        if trace:
-            trace_lines.append(render())
-
         if steps > max_steps:
             raise ParseError(f"Exceeded {max_steps} steps, likely an infinite loop.")
+
+
+def run(tm, input_str, max_steps=200000, trace=False):
+    blank = tm["blank"]
+    trace_lines = []
+    final = None
+
+    for snapshot in step_machine(tm, input_str, max_steps=max_steps):
+        if trace:
+            trace_lines.append(render_tape_line(snapshot, blank))
+        if snapshot["status"] != "running":
+            final = snapshot
+
+    tape = list(final["left"]) + [final["head_char"]] + final["right"]
+    result = {
+        "accept": final["status"] == "accept",
+        "final_tape": prune_tape(tape, blank),
+        "steps": final["steps"],
+        "trace": trace_lines,
+    }
+    if final["status"] == "reject":
+        result["rejected_at"] = final["rejected_at"]
+    return result
+
+
+def print_result(input_str, result, trace=False):
+    if trace:
+        print("\n".join(result["trace"]))
+        print("---")
+
+    print(f"input:      {input_str}")
+    print(f"steps:      {result['steps']}")
+    print(f"result:     {'accept' if result['accept'] else 'reject'}")
+    print(f"final tape: {result['final_tape']!r}")
+    if not result["accept"]:
+        print(f"rejected at (state, symbol): {result['rejected_at']}")
 
 
 def main():
@@ -223,17 +279,7 @@ def main():
 
     tm = parse_tm(text)
     result = run(tm, input_str, trace=trace)
-
-    if trace:
-        print("\n".join(result["trace"]))
-        print("---")
-
-    print(f"input:      {input_str}")
-    print(f"steps:      {result['steps']}")
-    print(f"result:     {'accept' if result['accept'] else 'reject'}")
-    print(f"final tape: {result['final_tape']!r}")
-    if not result["accept"]:
-        print(f"rejected at (state, symbol): {result['rejected_at']}")
+    print_result(input_str, result, trace)
 
 
 if __name__ == "__main__":
