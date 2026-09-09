@@ -1,0 +1,25 @@
+M=({"accept","cleanup","cross","dec","inc","seek"},
+   {'+','0','1'},
+   {'+','0','1','B'},
+   d,
+   "seek",
+   'B',
+   {"accept"})
+d=[
+    ("cleanup",'0')->("cleanup",'B',R),
+    ("cleanup",'1')->("cleanup",'B',R),
+    ("cleanup",'B')->("accept",'B',R),
+    ("cross",'+')->("inc",'+',L),
+    ("cross",'0')->("cross",'0',L),
+    ("cross",'1')->("cross",'1',L),
+    ("dec",'+')->("cleanup",'B',R),
+    ("dec",'0')->("dec",'1',L),
+    ("dec",'1')->("cross",'0',L),
+    ("inc",'0')->("seek",'1',R),
+    ("inc",'1')->("inc",'0',L),
+    ("inc",'B')->("seek",'1',R),
+    ("seek",'+')->("seek",'+',R),
+    ("seek",'0')->("seek",'0',R),
+    ("seek",'1')->("seek",'1',R),
+    ("seek",'B')->("dec",'B',L)
+]
