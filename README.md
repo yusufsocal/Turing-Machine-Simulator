@@ -12,6 +12,7 @@ run.bat ripple_carry 101+110
 run.bat dec_inc 101+110 --trace
 run.bat prescan 101+110 --visual
 ```
+Might need to add a `.\` before the running the commands.
 
 Run it with no arguments to list the available machines:
 
